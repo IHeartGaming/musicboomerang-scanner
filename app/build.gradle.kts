@@ -24,7 +24,7 @@ android {
         targetSdk = 36
         val gitTag: String = System.getenv("GIT_TAG") ?: "0.0.0"
         versionName = gitTag
-        versionCode = gitTag.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 1
+        versionCode = gitTag.replace(Regex("[^0-9]"), "").toIntOrNull()?.takeIf { it > 0 } ?: 1
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
