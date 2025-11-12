@@ -6,16 +6,25 @@ plugins {
 
 android {
     namespace = "nl.iheartgaming.musicboomerangscanner"
-    compileSdk {
-        version = release(36)
+    compileSdk = 36
+
+    signingConfigs {
+        create("release") {
+            // Only configure if environment variables are set
+            System.getenv("KEYSTORE_PATH")?.let { storeFile = file(it) }
+            System.getenv("KEYSTORE_PASSWORD")?.let { storePassword = it }
+            System.getenv("KEY_PASSWORD")?.let { keyPassword = it }
+            System.getenv("KEY_ALIAS")?.let { keyAlias = it }
+        }
     }
 
     defaultConfig {
         applicationId = "nl.iheartgaming.musicboomerangscanner"
         minSdk = 21
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        val gitTag: String = System.getenv("GIT_TAG") ?: "0.0.0"
+        versionName = gitTag
+        versionCode = gitTag.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 1
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,6 +36,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            // Only assign signing config if keystore path exists
+            System.getenv("KEYSTORE_PATH")?.let {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
