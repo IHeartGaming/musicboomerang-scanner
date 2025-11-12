@@ -1,0 +1,56 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Signed APK and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for changelog generation
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Get tag
+        run: echo "GIT_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Decode keystore
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
+          echo "KEYSTORE_PATH=$PWD/keystore.jks" >> $GITHUB_ENV
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Build release
+        run: ./gradlew clean assembleRelease
+        env:
+          GIT_TAG: ${{ env.GIT_TAG }}
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+
+      - name: Find APK
+        id: apk
+        run: echo "APK_PATH=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)" >> $GITHUB_ENV
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.GIT_TAG }}
+          name: ${{ env.GIT_TAG }}
+          files: ${{ env.APK_PATH }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
