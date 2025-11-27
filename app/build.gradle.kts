@@ -52,6 +52,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -71,7 +72,5 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-    implementation("com.opencsv:opencsv:5.12.0") {
-        exclude(group = "commons-logging", module = "commons-logging")
-    }
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
