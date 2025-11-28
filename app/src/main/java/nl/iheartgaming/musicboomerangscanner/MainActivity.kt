@@ -42,6 +42,7 @@ import nl.iheartgaming.musicboomerangscanner.ui.theme.MusicBoomerangScannerTheme
 import org.json.JSONArray
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -90,7 +91,8 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(56.dp)
-                                    .padding(horizontal = 16.dp),
+                                    .padding(horizontal = 16.dp)
+                                    .padding(WindowInsets.statusBars.asPaddingValues()),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -128,6 +130,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
+                                    .padding(WindowInsets.statusBars.asPaddingValues())
                                     .padding(16.dp)
                                     .background(
                                         Color.Black.copy(alpha = 0.5f),
@@ -411,6 +414,10 @@ fun MainScreen(
                     },
                 keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
                 singleLine = true,
+                textStyle = LocalTextStyle.current.copy(
+                    fontSize = 36.sp,
+                    lineHeight = 40.sp
+                ),
                 enabled = true,
                 keyboardActions = KeyboardActions(
                     onDone = {
