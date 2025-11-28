@@ -258,8 +258,8 @@ class MainActivity : ComponentActivity() {
                     withContext(Dispatchers.Main) { callback(true, null) }
                 }
 
-            } catch (_: Exception) {
-                withContext(Dispatchers.Main) { callback(false, "Network error") }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { callback(false, "Network error: ${e.message}") }
             }
         }
     }
