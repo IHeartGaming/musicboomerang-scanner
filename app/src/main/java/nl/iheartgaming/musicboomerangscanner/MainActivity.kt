@@ -7,7 +7,12 @@ import android.os.Vibrator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.OptIn
 import androidx.annotation.RequiresPermission
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -15,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +40,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import nl.iheartgaming.musicboomerangscanner.ui.theme.MusicBoomerangScannerTheme
 import org.json.JSONArray
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
 
 data class Want(
     val barcode: String,
@@ -55,7 +70,10 @@ val httpClient = okhttp3.OkHttpClient.Builder()
 
 class MainActivity : ComponentActivity() {
     private var loggedIn by mutableStateOf(false)
+    private var cameraActive by mutableStateOf(false)
     private var lastMatch by mutableStateOf<Want?>(null)
+    private var barcodeText by mutableStateOf("")
+    private var hasSubmitted by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,19 +85,21 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     containerColor = Color(0xFF1C2C4D),
                     topBar = {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                "MusicBoomerang Scanner",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = Color.White
-                            )
+                        if (!cameraActive) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "MusicBoomerang Scanner",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 ) { innerPadding ->
@@ -89,11 +109,50 @@ class MainActivity : ComponentActivity() {
                             onLogin = { user, pass, callback -> login(user, pass, callback) },
                             playSound = { resId -> this@MainActivity.playSound(resId) }
                         )
+                    } else if (cameraActive) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            CameraScanView(
+                                onBarcodeDetected = { code ->
+                                    if (!hasSubmitted) {
+                                        hasSubmitted = true
+                                        handleBarcode(code)
+                                        cameraActive = false
+                                    }
+                                },
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    cameraActive = false
+                                    hasSubmitted = false
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(16.dp)
+                                    .background(
+                                        Color.Black.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close camera",
+                                    tint = Color.White
+                                )
+                            }
+                        }
                     } else {
                         MainScreen(
                             modifier = Modifier.padding(innerPadding),
+                            barcodeText = barcodeText,
                             onBarcodeSubmitted = { barcode -> handleBarcode(barcode) },
-                            lastMatch = lastMatch
+                            onBarcodeTextChange = { barcodeText = it },
+                            lastMatch = lastMatch,
+                            onCameraButtonClick = {
+                                cameraActive = true
+                                hasSubmitted = false
+                            }
                         )
                     }
                 }
@@ -139,7 +198,6 @@ class MainActivity : ComponentActivity() {
                         lastMatch = want
                     }
                 }
-
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
                     playSound(R.raw.error_sound)
@@ -308,10 +366,12 @@ fun LoginScreen(
 @Composable
 fun MainScreen(
     modifier: Modifier,
+    barcodeText: String,
+    onBarcodeTextChange: (String) -> Unit,
     onBarcodeSubmitted: (String) -> Unit,
-    lastMatch: Want?
+    lastMatch: Want?,
+    onCameraButtonClick: () -> Unit
 ) {
-    var barcodeText by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
 
     Column(
@@ -321,46 +381,71 @@ fun MainScreen(
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        BasicTextField(
-            value = barcodeText,
-            onValueChange = { barcodeText = it },
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White, shape = RoundedCornerShape(6.dp))
-                .border(1.dp, Color.Black, shape = RoundedCornerShape(6.dp))
+                .height(IntrinsicSize.Min)
                 .padding(8.dp)
-                .onKeyEvent { keyEvent ->
-                    if (keyEvent.type == KeyEventType.KeyUp && keyEvent.key == Key.Enter) {
+        ) {
+            BasicTextField(
+                value = barcodeText,
+                onValueChange = { onBarcodeTextChange(it) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+                    .background(Color.White, shape = RoundedCornerShape(6.dp))
+                    .border(1.dp, Color.Black, shape = RoundedCornerShape(6.dp))
+                    .padding(8.dp)
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.type == KeyEventType.KeyUp && keyEvent.key == Key.Enter) {
+                            if (barcodeText.isNotEmpty()) {
+                                onBarcodeSubmitted(barcodeText.trim())
+                                onBarcodeTextChange("")
+                                keyboardController?.hide()
+                            }
+                            true // consume event
+                        } else {
+                            false
+                        }
+                    },
+                keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                enabled = true,
+                keyboardActions = KeyboardActions(
+                    onDone = {
                         if (barcodeText.isNotEmpty()) {
                             onBarcodeSubmitted(barcodeText.trim())
-                            barcodeText = ""
+                            onBarcodeTextChange("")
                             keyboardController?.hide()
                         }
-                        true // consume event
-                    } else {
-                        false
                     }
-                },
-            keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            enabled = true,
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    if (barcodeText.isNotEmpty()) {
-                        onBarcodeSubmitted(barcodeText.trim())
-                        barcodeText = ""
-                        keyboardController?.hide()
-                    }
-                }
+                )
             )
-        )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            IconButton(
+                onClick = onCameraButtonClick,
+                modifier = Modifier
+                    .height(56.dp)
+                    .aspectRatio(1f)
+                    .background(Color(0xFFFABD08), shape = RoundedCornerShape(6.dp))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = "Scan Barcode",
+                    tint = Color(0xFF1C2C4D)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
         Button(
             onClick = {
                 onBarcodeSubmitted(barcodeText)
-                barcodeText = ""
+                onBarcodeTextChange("")
                 keyboardController?.hide()
             },
             enabled = barcodeText.isNotEmpty(),
@@ -384,4 +469,75 @@ fun MainScreen(
             Text("Wants: ${want.wants}", color = Color.White)
         }
     }
+}
+
+@OptIn(ExperimentalGetImage::class)
+@Composable
+fun CameraScanView(
+    onBarcodeDetected: (String) -> Unit,
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    AndroidView(
+        factory = { ctx ->
+            val previewView = androidx.camera.view.PreviewView(ctx)
+
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+            cameraProviderFuture.addListener({
+                val cameraProvider = cameraProviderFuture.get()
+
+                val preview = androidx.camera.core.Preview.Builder().build().also {
+                    it.surfaceProvider = previewView.surfaceProvider
+                }
+
+                val scanner = BarcodeScanning.getClient(
+                    BarcodeScannerOptions.Builder()
+                        .setBarcodeFormats(
+                            Barcode.FORMAT_UPC_A,
+                            Barcode.FORMAT_UPC_E,
+                            Barcode.FORMAT_EAN_8,
+                            Barcode.FORMAT_EAN_13
+                        )
+                        .build()
+                )
+
+                val analyzer = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                analyzer.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                    val mediaImage = imageProxy.image
+                    if (mediaImage != null) {
+                        val image = InputImage.fromMediaImage(
+                            mediaImage,
+                            imageProxy.imageInfo.rotationDegrees
+                        )
+                        scanner.process(image)
+                            .addOnSuccessListener { barcodes ->
+                                barcodes.firstOrNull()?.rawValue?.let { code ->
+                                    // Submit barcode and close camera
+                                    onBarcodeDetected(code)
+                                }
+                            }
+                            .addOnCompleteListener { imageProxy.close() }
+                    } else {
+                        imageProxy.close()
+                    }
+                }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    analyzer
+                )
+
+            }, ContextCompat.getMainExecutor(ctx))
+
+            previewView
+        },
+        modifier = Modifier.fillMaxSize()
+    )
 }
